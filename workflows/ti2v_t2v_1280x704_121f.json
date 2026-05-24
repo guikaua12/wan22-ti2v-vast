@@ -47,7 +47,8 @@
       "width": 1280,
       "height": 704,
       "length": 121,
-      "batch_size": 1
+      "batch_size": 1,
+      "vae": ["39", 0]
     }
   },
   "3": {

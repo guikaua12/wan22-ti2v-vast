@@ -54,7 +54,8 @@
       "height": 704,
       "length": 121,
       "batch_size": 1,
-      "start_image": ["57", 0]
+      "start_image": ["57", 0],
+      "vae": ["39", 0]
     }
   },
   "3": {

@@ -3,21 +3,25 @@
 Minimal example: Wan 2.2 TI2V-5B image-to-video via Vast.ai Serverless.
 
 Usage:
-    pip install vastai-sdk
+    pip install vastai
     export VAST_API_KEY="your-api-key"
     python example_request.py
+
+`pip install vastai-sdk` also works as a compatibility wrapper, but
+`vastai` is the preferred package name.
 
 Set IMAGE_URL below to the URL of your input image.
 The Vast API wrapper automatically downloads URLs found in workflow
 string fields and replaces them with local paths before sending to ComfyUI.
 """
 
+import asyncio
 import json
 import uuid
 
 from vastai import Serverless
 
-ENDPOINT_NAME = "comfyui-json"
+ENDPOINT_NAME = "your-endpoint-name"  # <-- CHANGE THIS: your Vast.ai endpoint name
 
 IMAGE_URL = "https://example.com/your-input-image.png"  # <-- CHANGE THIS
 
@@ -74,6 +78,7 @@ workflow = {
             "length": 121,
             "batch_size": 1,
             "start_image": ["57", 0],
+            "vae": ["39", 0],
         },
     },
     "3": {
@@ -126,17 +131,30 @@ payload = {
 # ──────────────────────────────────────────────────────────────────────
 
 
-def main():
-    client = Serverless(endpoint=ENDPOINT_NAME)
-    print(f"Sending request to endpoint '{ENDPOINT_NAME}'...")
-    print(f"  Image URL : {IMAGE_URL}")
-    print(f"  Resolution: 1280x704, 121 frames @ 24 fps")
-    print(f"  Request ID: {payload['input']['request_id']}")
-    print()
+async def main():
+    async with Serverless() as client:
+        print(f"Resolving endpoint '{ENDPOINT_NAME}'...")
+        endpoint = await client.get_endpoint(ENDPOINT_NAME)
 
-    result = client.request(payload, timeout=600)
-    print(json.dumps(result, indent=2, default=str))
+        print(f"Sending request to /generate/sync...")
+        print(f"  Image URL : {IMAGE_URL}")
+        print(f"  Resolution: 1280x704, 121 frames @ 24 fps")
+        print(f"  Request ID: {payload['input']['request_id']}")
+        print()
+
+        request = client.queue_endpoint_request(
+            endpoint=endpoint,
+            worker_route="/generate/sync",
+            worker_payload=payload,
+            worker_timeout=600,
+        )
+        result = await request
+        print(json.dumps(result, indent=2, default=str))
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except ImportError:
+        print("Missing dependency: install with `pip install vastai` or `pip install vastai-sdk`.")
+        raise SystemExit(1)

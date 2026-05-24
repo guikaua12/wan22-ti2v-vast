@@ -83,8 +83,10 @@ Total download: approximately 15 GB.
 ### Install the SDK
 
 ```bash
-pip install vastai-sdk
+pip install vastai
 ```
+
+`pip install vastai-sdk` also works as a compatibility wrapper.
 
 ### Set your API key
 
