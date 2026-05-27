@@ -4,7 +4,12 @@ from pathlib import Path
 
 import requests
 
-from workflow import build_workflow
+try:
+    from executor.workflow import build_workflow
+except ModuleNotFoundError as exc:
+    if exc.name != "executor":
+        raise
+    from workflow import build_workflow
 
 
 class ComfyClient:

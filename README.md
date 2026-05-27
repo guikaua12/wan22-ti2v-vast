@@ -11,7 +11,12 @@ Both modes use the same Wan 2.2 TI2V-5B diffusion model at 1280x704 resolution (
 
 ## Important: Backend
 
-This repo targets Vast's **generic `comfyui-json` worker** — the backend at `workers/comfyui-json/` in the [PyWorker](https://github.com/vast-ai/pyworker) repository. It accepts arbitrary ComfyUI API-format workflows via `/generate/sync`.
+This repo supports two Vast Serverless modes:
+
+- Generic `comfyui-json` worker: accepts arbitrary ComfyUI API-format workflows via `/generate/sync`.
+- Flourn GPU executor: exposes `/drain`, then pulls queued `wan_ti2v_scene` jobs from the Flourn Postgres queue.
+
+The generic mode remains the default. Set `FLOURN_EXECUTOR=true` to install the custom `/drain` PyWorker route used by the Flourn API.
 
 If your Vast template uses the **dedicated `wan` worker** (`workers/wan/`), the benchmark path and default behavior may differ. Ensure your template is configured for the generic ComfyUI JSON worker, or set `PYWORKER_REPO` / `PYWORKER_REF` to a fork that uses `comfyui-json` as the default backend.
 
@@ -31,6 +36,29 @@ vastai/comfy:latest
 | `PYWORKER_REPO` | `https://github.com/vast-ai/pyworker` | No (default) |
 | `PYWORKER_REF` | `main` | No (default) |
 | `WEBHOOK_URL` | Your webhook endpoint | No |
+
+### Flourn executor mode
+
+Set these when the endpoint is used by the Flourn backend queue.
+
+| Variable | Value | Required |
+|---|---|---|
+| `FLOURN_EXECUTOR` | `true` | Yes |
+| `DATABASE_URL` | Flourn Postgres URL reachable from the Vast worker | Yes |
+| `R2_PUBLIC_BASE_URL` | Public base URL for input frame objects | Yes |
+| `S3_ACCESS_KEY_ID` | R2 access key | Yes |
+| `S3_SECRET_ACCESS_KEY` | R2 secret key | Yes |
+| `S3_BUCKET_NAME` | R2 bucket name | Yes |
+| `S3_ENDPOINT_URL` | R2 S3-compatible endpoint URL | Yes |
+| `S3_REGION` | `auto` for Cloudflare R2 | No |
+| `EXECUTOR_REF` | Git branch/tag for this repo, default `main` | No |
+
+Configure the Flourn API to wake this route:
+
+```properties
+FLOURN_GPU_EXECUTOR_WORKER_ROUTE=/drain
+FLOURN_GPU_EXECUTOR_WAKE_TIMEOUT=PT10M
+```
 
 ### S3 upload (optional)
 

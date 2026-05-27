@@ -3,9 +3,16 @@ set -euo pipefail
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Wan 2.2 TI2V-5B — Vast.ai Serverless Provisioning Script
-# Targets the generic comfyui-json worker backend.
+#
+# Modes:
+#   FLOURN_EXECUTOR=true  — Flourn GPU executor (pulls jobs from Postgres queue)
+#   FLOURN_EXECUTOR=false — Generic comfyui-json PyWorker (default, Vast /generate/sync)
 # ──────────────────────────────────────────────────────────────────────────────
 
+FLOURN_EXECUTOR="${FLOURN_EXECUTOR:-false}"
+EXECUTOR_REPO="${EXECUTOR_REPO:-https://github.com/guikaua12/wan22-ti2v-vast.git}"
+EXECUTOR_REF="${EXECUTOR_REF:-main}"
+EXECUTOR_DIR="${EXECUTOR_DIR:-/workspace/flourn-gpu-executor}"
 BENCHMARK_JSON_URL="${BENCHMARK_JSON_URL:-https://raw.githubusercontent.com/guikaua12/wan22-ti2v-vast/main/benchmark.json}"
 
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
@@ -30,20 +37,22 @@ fi
 if [[ -z "$SERVER_DIR" ]]; then
     log "ERROR: Could not locate the PyWorker server directory."
     log "  Checked: /workspace/vast-pyworker, /workspace/pyworker, \$(pwd)/workers/comfyui-json"
-    log "  The running template may not be using the generic ComfyUI JSON backend."
     log "  Set SERVER_DIR to the root of your PyWorker checkout and re-run."
     exit 1
 fi
 
-BENCHMARK_DIR="${SERVER_DIR}/workers/comfyui-json/misc"
+if [[ "$FLOURN_EXECUTOR" != "true" ]]; then
+    BENCHMARK_DIR="${SERVER_DIR}/workers/comfyui-json/misc"
 
-if [[ ! -d "${SERVER_DIR}/workers/comfyui-json" ]]; then
-    log "ERROR: ${SERVER_DIR}/workers/comfyui-json does not exist."
-    log "  This provisioning script targets Vast's generic comfyui-json worker."
-    log "  If you are using the dedicated 'wan' worker, the benchmark path differs."
-    exit 1
+    if [[ ! -d "${SERVER_DIR}/workers/comfyui-json" ]]; then
+        log "ERROR: ${SERVER_DIR}/workers/comfyui-json does not exist."
+        log "  This provisioning script targets Vast's generic comfyui-json worker."
+        log "  If you are using the dedicated 'wan' worker, the benchmark path differs."
+        exit 1
+    fi
 fi
 
+log "Mode        : $([[ "$FLOURN_EXECUTOR" == "true" ]] && echo "flourn-executor" || echo "pyworker")"
 log "ComfyUI dir : ${COMFYUI_DIR}"
 log "Server dir  : ${SERVER_DIR}"
 
@@ -55,8 +64,8 @@ dirs=(
     "${COMFYUI_DIR}/models/text_encoders"
     "${COMFYUI_DIR}/custom_nodes"
     "${COMFYUI_DIR}/output"
-    "${BENCHMARK_DIR}"
 )
+[[ "$FLOURN_EXECUTOR" != "true" ]] && dirs+=("${BENCHMARK_DIR}")
 
 for d in "${dirs[@]}"; do
     mkdir -p "$d"
@@ -108,21 +117,49 @@ for rel in "${!MODELS[@]}"; do
     ls -lh "${COMFYUI_DIR}/models/${rel}"
 done
 
-# ── Benchmark JSON ───────────────────────────────────────────────────────────
+# ── Benchmark JSON (PyWorker mode only) ─────────────────────────────────────
 
-BENCHMARK_DEST="${BENCHMARK_DIR}/benchmark.json"
-log "Installing benchmark workflow: ${BENCHMARK_DEST}"
+if [[ "$FLOURN_EXECUTOR" != "true" ]]; then
+    BENCHMARK_DEST="${BENCHMARK_DIR}/benchmark.json"
+    log "Installing benchmark workflow: ${BENCHMARK_DEST}"
 
-wget -q -O "$BENCHMARK_DEST" "$BENCHMARK_JSON_URL" || {
-    log "ERROR: Failed to download benchmark.json from ${BENCHMARK_JSON_URL}"
-    exit 1
-}
+    wget -q -O "$BENCHMARK_DEST" "$BENCHMARK_JSON_URL" || {
+        log "ERROR: Failed to download benchmark.json from ${BENCHMARK_JSON_URL}"
+        exit 1
+    }
 
-python3 -m json.tool "$BENCHMARK_DEST" >/dev/null || {
-    log "ERROR: benchmark.json is not valid JSON"
-    exit 1
-}
-log "Benchmark JSON validated OK"
+    python3 -m json.tool "$BENCHMARK_DEST" >/dev/null || {
+        log "ERROR: benchmark.json is not valid JSON"
+        exit 1
+    }
+    log "Benchmark JSON validated OK"
+fi
+
+# ── Flourn GPU executor setup ───────────────────────────────────────────────
+
+if [[ "$FLOURN_EXECUTOR" == "true" ]]; then
+    log "Cloning executor repo: ${EXECUTOR_REPO} (${EXECUTOR_REF})"
+    if [[ -d "${EXECUTOR_DIR}/.git" ]]; then
+        cd "$EXECUTOR_DIR"
+        git fetch origin "$EXECUTOR_REF" && git checkout FETCH_HEAD
+        cd -
+        log "Executor repo updated"
+    else
+        git clone --depth 1 --branch "$EXECUTOR_REF" "$EXECUTOR_REPO" "$EXECUTOR_DIR"
+        log "Executor repo cloned"
+    fi
+
+    log "Installing executor Python dependencies"
+    python3 -m pip install --no-cache-dir -r "${EXECUTOR_DIR}/requirements.txt"
+
+    log "Installing Flourn PyWorker route into ${SERVER_DIR}"
+    cp "${EXECUTOR_DIR}/worker.py" "${SERVER_DIR}/worker.py"
+    rm -rf "${SERVER_DIR}/executor"
+    cp -R "${EXECUTOR_DIR}/executor" "${SERVER_DIR}/executor"
+
+    chmod +x "${EXECUTOR_DIR}/executor/entrypoint.sh"
+    log "Executor setup complete"
+fi
 
 # ── Output cleanup cron ──────────────────────────────────────────────────────
 # Delete output files older than 24 h when available disk drops below 512 MB.
@@ -152,9 +189,14 @@ fi
 
 echo ""
 log "=== DIAGNOSTICS ==="
+log "Mode              : $([[ "$FLOURN_EXECUTOR" == "true" ]] && echo "flourn-executor" || echo "pyworker")"
 log "ComfyUI dir       : ${COMFYUI_DIR}"
 log "Server dir        : ${SERVER_DIR}"
-log "Benchmark path    : ${BENCHMARK_DEST}"
+if [[ "$FLOURN_EXECUTOR" == "true" ]]; then
+    log "Executor dir      : ${EXECUTOR_DIR}"
+else
+    log "Benchmark path    : ${BENCHMARK_DEST}"
+fi
 log "Cleanup cron      : ${CRON_INSTALLED}"
 echo ""
 log "Model files:"

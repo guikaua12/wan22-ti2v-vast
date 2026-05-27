@@ -2,11 +2,20 @@ import socket
 import time
 from pathlib import Path
 
-from comfy import ComfyClient
-from config import load_config
-from db import QueueDb
-from probe import probe_video
-from storage import R2Storage
+try:
+    from executor.comfy import ComfyClient
+    from executor.config import load_config
+    from executor.db import QueueDb
+    from executor.probe import probe_video
+    from executor.storage import R2Storage
+except ModuleNotFoundError as exc:
+    if exc.name != "executor":
+        raise
+    from comfy import ComfyClient
+    from config import load_config
+    from db import QueueDb
+    from probe import probe_video
+    from storage import R2Storage
 
 
 def executor_id(prefix: str) -> str:
